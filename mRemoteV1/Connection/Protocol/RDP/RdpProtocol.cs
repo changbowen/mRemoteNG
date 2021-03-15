@@ -31,9 +31,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private bool _redirectKeys;
         private bool _alertOnIdleDisconnect;
         private readonly FrmMain _frmMain = FrmMain.Default;
+		private SizeF scalingFactor;
 
-        #region Properties
-        public bool SmartSize
+		#region Properties
+		public bool SmartSize
 		{
 			get
 			{
@@ -128,7 +129,11 @@ namespace mRemoteNG.Connection.Protocol.RDP
 						
 				_rdpClient.Server = _connectionInfo.Hostname;
 
-                SetCredentials();
+				using (var graphics = Graphics.FromHwnd(Process.GetCurrentProcess().MainWindowHandle)) {
+					scalingFactor = new SizeF(graphics.DpiX / 96f, graphics.DpiY / 96f);
+				}
+
+				SetCredentials();
                 SetResolution();
                 _rdpClient.FullScreenTitle = _connectionInfo.Name;
 
@@ -488,6 +493,9 @@ namespace mRemoteNG.Connection.Protocol.RDP
 		{
 			try
 			{
+				SetExtendedProperty("DesktopScaleFactor", GetDesktopScaleFactor());
+				SetExtendedProperty("DeviceScaleFactor", GetDeviceScaleFactor());
+
 				if ((Force & ConnectionInfo.Force.Fullscreen) == ConnectionInfo.Force.Fullscreen)
 				{
 					_rdpClient.FullScreen = true;
@@ -639,10 +647,67 @@ namespace mRemoteNG.Connection.Protocol.RDP
 				Runtime.MessageCollector.AddExceptionStackTrace(Language.strRdpSetEventHandlersFailed, ex);
 			}
 		}
-        #endregion
-		
-        #region Private Events & Handlers
-        private void RDPEvent_OnIdleTimeoutNotification()
+
+		private uint GetDesktopScaleFactor()
+		{
+			var scaleFactor = (uint)(scalingFactor.Width * 100);
+			switch (scaleFactor) {
+				case 125:
+					return 125;
+				case 150:
+				case 175:
+					return 150;
+				case 200:
+					return 200;
+			}
+			if (scaleFactor > 200)
+				return 200;
+			return 100;
+		}
+		private uint GetDeviceScaleFactor()
+		{
+			var scaleFactor = (uint)(scalingFactor.Width * 100);
+			switch (scaleFactor) {
+				case 125:
+				case 150:
+				case 175:
+					return 140;
+				case 200:
+					return 180;
+			}
+			if (scaleFactor > 200)
+				return 180;
+			return 100;
+		}
+
+		protected object GetExtendedProperty(string property)
+		{
+			try {
+				// ReSharper disable once UseIndexedProperty
+				return ((IMsRdpExtendedSettings)_rdpClient).get_Property(property);
+			}
+			catch (Exception e) {
+				Runtime.MessageCollector.AddExceptionMessage($"Error getting extended RDP property '{property}'",
+															 e, MessageClass.WarningMsg, false);
+				return null;
+			}
+		}
+
+		protected void SetExtendedProperty(string property, object value)
+		{
+			try {
+				// ReSharper disable once UseIndexedProperty
+				((IMsRdpExtendedSettings)_rdpClient).set_Property(property, ref value);
+			}
+			catch (Exception e) {
+				Runtime.MessageCollector.AddExceptionMessage($"Error setting extended RDP property '{property}'",
+															 e, MessageClass.WarningMsg, false);
+			}
+		}
+		#endregion
+
+		#region Private Events & Handlers
+		private void RDPEvent_OnIdleTimeoutNotification()
         {
             Close(); //Simply close the RDP Session if the idle timeout has been triggered.
 
